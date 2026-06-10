@@ -1,9 +1,7 @@
 """
 app.py — Fake News Detector | Streamlit Web Application
 """
-import streamlit as st
 
-st.write("APP STARTED")
 import json, os, re, string, warnings, datetime
 warnings.filterwarnings("ignore")
 
@@ -33,18 +31,21 @@ import nltk
 
 try:
     from nltk.corpus import stopwords
-    stopwords.words("english")
-except LookupError:
-    nltk.download("stopwords", quiet=True)
-    from nltk.corpus import stopwords
+    STOP_WORDS = set(stopwords.words("english"))
+except Exception:
+    STOP_WORDS = set()
 
-STOP_WORDS = set(stopwords.words("english")) | {
-    'reuters', 'ap', 'afp', 'said', 'would', 'also', 'one',
-    'two', 'three', 'new', 'year', 'say', 'told', 'added',
-    'according', 'pti', 'ani', 'ians'
-}
+STOP_WORDS.update({
+    "reuters", "ap", "afp", "said", "would",
+    "also", "one", "two", "three", "new",
+    "year", "say", "told", "added",
+    "according", "pti", "ani", "ians"
+})
 
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")
+try:
+    NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
+except Exception:
+    NEWS_API_KEY = ""
 
 SOURCE_META = {
     "the-hindu":           ("🇮🇳", "The Hindu"),
@@ -160,20 +161,27 @@ div[data-testid="stTextArea"] textarea {
 # ── Load model ────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def load_artifacts():
-    base = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base, "model.pkl")
-    vec_path = os.path.join(base, "vectorizer.pkl")
-
-    if not os.path.exists(model_path) or not os.path.exists(vec_path):
-        return None, None
-
     try:
+        base = os.path.dirname(os.path.abspath(__file__))
+
+        model_path = os.path.join(base, "model.pkl")
+        vectorizer_path = os.path.join(base, "vectorizer.pkl")
+
+        if not os.path.exists(model_path):
+            st.error(f"Missing: {model_path}")
+            return None, None
+
+        if not os.path.exists(vectorizer_path):
+            st.error(f"Missing: {vectorizer_path}")
+            return None, None
+
         model = joblib.load(model_path)
-        vectorizer = joblib.load(vec_path)
+        vectorizer = joblib.load(vectorizer_path)
+
         return model, vectorizer
 
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        st.error(f"Model loading error: {e}")
         return None, None
 
 @st.cache_data(show_spinner=False)
@@ -251,14 +259,7 @@ def render_lime_html(text: str, weights: dict) -> str:
 
 # ── URL scrape ────────────────────────────────────────────────────────────────
 def scrape_url(url: str) -> str:
-    try:
-        from newspaper import Article
-        art = Article(url)
-        art.download()
-        art.parse()
-        return art.text.strip() if art.text.strip() else ""
-    except Exception:
-        return ""
+    return ""
 
 # ── NewsAPI ───────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=600)
