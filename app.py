@@ -191,7 +191,8 @@ def load_metrics():
             return json.load(f)
     return {}
 
-model, vectorizer = load_artifacts()
+model = None
+vectorizer = None
 
 st.sidebar.success("App Started")
 st.sidebar.write("Model Loaded:", model is not None)
@@ -339,7 +340,7 @@ with st.sidebar:
     st.markdown("---")
 
     if model is None:
-        st.error("Model not found.\nRun `python train_model.py`")
+        st.warning("Debug mode: model loading disabled.")
     else:
         st.markdown("**Model**")
         st.markdown(
