@@ -1,40 +1,17 @@
 """
 app.py — Fake News Detector | Streamlit Web Application
-Author: Final Year Project
 """
 
 import json, os, re, string, warnings, datetime
 warnings.filterwarnings("ignore")
 
 import joblib
-import nltk
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
 
-# ── Auto-train on first run (Streamlit Cloud) ─────────────────────────────────
-# ── Auto-train on first run (Streamlit Cloud) ─────────────────────────────────
-if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
-    import subprocess
-    st.warning("⏳ First run — training model. This takes about 3 minutes. Please wait.")
-    progress = st.progress(0, text="Downloading dataset...")
-    subprocess.run(["python", "download_dataset.py"], check=True)
-    progress.progress(40, text="Training model...")
-    subprocess.run(["python", "train_model.py"], check=True)
-    progress.progress(100, text="Done!")
-    st.success("✅ Ready! Reloading...")
-    st.rerun()
-
-nltk.download("stopwords", quiet=True)
-from nltk.corpus import stopwords
-STOP_WORDS = set(stopwords.words("english")) | {
-    'reuters', 'ap', 'afp', 'said', 'would', 'also', 'one',
-    'two', 'three', 'new', 'year', 'say', 'told', 'added', 'according',
-    'pti', 'ani', 'ians'
-}
-
-# ── Config ────────────────────────────────────────────────────────────────────
+# ── Config — MUST be first Streamlit call ─────────────────────────────────────
 st.set_page_config(
     page_title="Fake News Detector",
     page_icon="🔍",
@@ -42,25 +19,50 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "fbe1af9131d1412a9336739da2599c32")
+# ── Auto-train on first run ───────────────────────────────────────────────────
+if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
+    import subprocess
+    st.title("⏳ First-time setup")
+    st.info("Training the model — this takes about 3 minutes. Please wait.")
+    progress = st.progress(0, text="Starting training...")
+    result = subprocess.run(
+        ["python", "train_model.py"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        st.error(f"Training failed:\n\n{result.stderr}")
+        st.stop()
+    progress.progress(100, text="Done!")
+    st.success("✅ Model trained! Reloading...")
+    st.rerun()
 
-# Source → (country flag, display name)
+# ── NLTK ──────────────────────────────────────────────────────────────────────
+import nltk
+nltk.download("stopwords", quiet=True)
+from nltk.corpus import stopwords
+
+STOP_WORDS = set(stopwords.words("english")) | {
+    'reuters', 'ap', 'afp', 'said', 'would', 'also', 'one',
+    'two', 'three', 'new', 'year', 'say', 'told', 'added',
+    'according', 'pti', 'ani', 'ians'
+}
+
+NEWS_API_KEY = "fbe1af9131d1412a9336739da2599c32"
+
 SOURCE_META = {
-    # Indian sources
-    "the-hindu":         ("🇮🇳", "The Hindu"),
-    "ndtv":              ("🇮🇳", "NDTV"),
-    "the-times-of-india":("🇮🇳", "Times of India"),
-    "india-today":       ("🇮🇳", "India Today"),
-    "hindustan-times":   ("🇮🇳", "Hindustan Times"),
-    "the-indian-express":("🇮🇳", "Indian Express"),
-    # US sources
-    "reuters":           ("🇺🇸", "Reuters"),
-    "associated-press":  ("🇺🇸", "AP"),
-    "the-washington-post":("🇺🇸","Washington Post"),
-    "the-new-york-times":("🇺🇸", "NY Times"),
-    "bbc-news":          ("🇬🇧", "BBC News"),
-    "cnn":               ("🇺🇸", "CNN"),
-    "al-jazeera-english":("🌍",  "Al Jazeera"),
+    "the-hindu":           ("🇮🇳", "The Hindu"),
+    "ndtv":                ("🇮🇳", "NDTV"),
+    "the-times-of-india":  ("🇮🇳", "Times of India"),
+    "india-today":         ("🇮🇳", "India Today"),
+    "hindustan-times":     ("🇮🇳", "Hindustan Times"),
+    "the-indian-express":  ("🇮🇳", "Indian Express"),
+    "reuters":             ("🇺🇸", "Reuters"),
+    "associated-press":    ("🇺🇸", "AP"),
+    "the-washington-post": ("🇺🇸", "Washington Post"),
+    "the-new-york-times":  ("🇺🇸", "NY Times"),
+    "bbc-news":            ("🇬🇧", "BBC News"),
+    "cnn":                 ("🇺🇸", "CNN"),
+    "al-jazeera-english":  ("🌍",  "Al Jazeera"),
 }
 
 # ── Styles ────────────────────────────────────────────────────────────────────
@@ -74,37 +76,42 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .app-header { text-align:center; padding:2.2rem 1rem 1.6rem; border-bottom:1.5px solid #e8ecf0; margin-bottom:2rem; }
 .app-header h1 { font-size:2.4rem; font-weight:700; color:#0f1923; letter-spacing:-0.5px; margin:0 0 0.4rem; }
 .app-header p  { font-size:1rem; color:#64748b; margin:0; font-weight:400; }
-.header-badge  { display:inline-block; background:#f0f4ff; color:#3b5bdb; font-size:0.72rem; font-weight:600;
-                 letter-spacing:0.8px; text-transform:uppercase; padding:3px 10px; border-radius:20px;
-                 margin-bottom:0.8rem; font-family:'JetBrains Mono',monospace; }
+.header-badge  { display:inline-block; background:#f0f4ff; color:#3b5bdb; font-size:0.72rem;
+                 font-weight:600; letter-spacing:0.8px; text-transform:uppercase; padding:3px 10px;
+                 border-radius:20px; margin-bottom:0.8rem; font-family:'JetBrains Mono',monospace; }
 
-.result-real { background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%); border:1.5px solid #86efac;
-               border-left:5px solid #16a34a; border-radius:12px; padding:1.4rem 1.8rem; margin:1rem 0; }
-.result-fake { background:linear-gradient(135deg,#fff7f7 0%,#fee2e2 100%); border:1.5px solid #fca5a5;
-               border-left:5px solid #dc2626; border-radius:12px; padding:1.4rem 1.8rem; margin:1rem 0; }
+.result-real { background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);
+               border:1.5px solid #86efac; border-left:5px solid #16a34a;
+               border-radius:12px; padding:1.4rem 1.8rem; margin:1rem 0; }
+.result-fake { background:linear-gradient(135deg,#fff7f7 0%,#fee2e2 100%);
+               border:1.5px solid #fca5a5; border-left:5px solid #dc2626;
+               border-radius:12px; padding:1.4rem 1.8rem; margin:1rem 0; }
 .result-label { font-size:1.6rem; font-weight:700; margin:0 0 0.3rem; letter-spacing:-0.3px; }
 .result-real .result-label { color:#15803d; }
 .result-fake .result-label { color:#b91c1c; }
 .result-sub { font-size:0.9rem; color:#64748b; margin:0; font-weight:400; }
 
-.conf-wrap { margin:1.2rem 0 0.6rem; }
+.conf-wrap  { margin:1.2rem 0 0.6rem; }
 .conf-label { font-size:0.78rem; font-weight:600; color:#94a3b8; text-transform:uppercase;
               letter-spacing:0.8px; margin-bottom:6px; font-family:'JetBrains Mono',monospace; }
-.conf-bar-bg { background:#e2e8f0; border-radius:8px; height:10px; width:100%; overflow:hidden; }
+.conf-bar-bg       { background:#e2e8f0; border-radius:8px; height:10px; width:100%; overflow:hidden; }
 .conf-bar-fill-real { background:linear-gradient(90deg,#16a34a,#4ade80); height:10px; border-radius:8px; }
 .conf-bar-fill-fake { background:linear-gradient(90deg,#dc2626,#f87171); height:10px; border-radius:8px; }
-.conf-pct { font-size:2.2rem; font-weight:700; font-family:'JetBrains Mono',monospace; margin-top:0.3rem; }
+.conf-pct      { font-size:2.2rem; font-weight:700; font-family:'JetBrains Mono',monospace; margin-top:0.3rem; }
 .conf-pct-real { color:#16a34a; }
 .conf-pct-fake { color:#dc2626; }
 
-.prob-row { display:flex; gap:12px; margin-top:1rem; }
-.prob-pill { flex:1; text-align:center; padding:0.6rem 1rem; border-radius:8px; border:1.5px solid #e2e8f0; background:#f8fafc; }
-.prob-pill-label { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.8px; font-weight:600; color:#94a3b8; font-family:'JetBrains Mono',monospace; }
-.prob-pill-val { font-size:1.3rem; font-weight:700; font-family:'JetBrains Mono',monospace; margin-top:2px; }
-.prob-fake-val { color:#dc2626; }
-.prob-real-val { color:#16a34a; }
+.prob-row  { display:flex; gap:12px; margin-top:1rem; }
+.prob-pill { flex:1; text-align:center; padding:0.6rem 1rem; border-radius:8px;
+             border:1.5px solid #e2e8f0; background:#f8fafc; }
+.prob-pill-label { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.8px;
+                   font-weight:600; color:#94a3b8; font-family:'JetBrains Mono',monospace; }
+.prob-pill-val   { font-size:1.3rem; font-weight:700; font-family:'JetBrains Mono',monospace; margin-top:2px; }
+.prob-fake-val   { color:#dc2626; }
+.prob-real-val   { color:#16a34a; }
 
-.lime-section { background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:12px; padding:1.2rem 1.4rem; margin:1.2rem 0; }
+.lime-section { background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:12px;
+                padding:1.2rem 1.4rem; margin:1.2rem 0; }
 .lime-title   { font-size:0.85rem; font-weight:600; color:#0f1923; margin:0 0 0.3rem;
                 text-transform:uppercase; letter-spacing:0.6px; font-family:'JetBrains Mono',monospace; }
 .lime-legend  { font-size:0.8rem; color:#64748b; margin:0 0 1rem; }
@@ -116,18 +123,18 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .lime-real-mild   { background:#dcfce7; color:#166534; }
 .lime-neutral     { color:#334155; }
 
-/* Live news cards */
-.news-card { background:#fff; border:1.5px solid #e2e8f0; border-radius:10px;
-             padding:1rem 1.2rem; margin-bottom:0.8rem; }
-.news-card-real { border-left:4px solid #16a34a; }
-.news-card-fake { border-left:4px solid #dc2626; }
+.news-card           { background:#fff; border:1.5px solid #e2e8f0; border-radius:10px;
+                       padding:1rem 1.2rem; margin-bottom:0.8rem; }
+.news-card-real      { border-left:4px solid #16a34a; }
+.news-card-fake      { border-left:4px solid #dc2626; }
 .news-card-uncertain { border-left:4px solid #d97706; }
 .news-headline { font-size:0.95rem; font-weight:600; color:#0f1923; margin:0 0 0.4rem; }
-.news-meta     { font-size:0.78rem; color:#94a3b8; margin:0 0 0.5rem; font-family:'JetBrains Mono',monospace; }
+.news-meta     { font-size:0.78rem; color:#94a3b8; margin:0 0 0.5rem;
+                 font-family:'JetBrains Mono',monospace; }
 .news-badge    { display:inline-block; font-size:0.72rem; font-weight:700; padding:2px 9px;
                  border-radius:20px; font-family:'JetBrains Mono',monospace; text-transform:uppercase; }
-.badge-real    { background:#dcfce7; color:#16a34a; }
-.badge-fake    { background:#fee2e2; color:#dc2626; }
+.badge-real      { background:#dcfce7; color:#16a34a; }
+.badge-fake      { background:#fee2e2; color:#dc2626; }
 .badge-uncertain { background:#fef3c7; color:#92400e; }
 
 .hist-section { margin-top:2rem; border-top:1.5px solid #e8ecf0; padding-top:1.4rem; }
@@ -138,15 +145,18 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
                         padding:0.8rem 1rem; margin-bottom:0.6rem; text-align:center; }
 .sidebar-metric-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.8px;
                         color:#94a3b8; font-weight:600; font-family:'JetBrains Mono',monospace; }
-.sidebar-metric-val   { font-size:1.5rem; font-weight:700; color:#0f1923; font-family:'JetBrains Mono',monospace; }
+.sidebar-metric-val   { font-size:1.5rem; font-weight:700; color:#0f1923;
+                        font-family:'JetBrains Mono',monospace; }
 
-div[data-testid="stTabs"] button { font-family:'Inter',sans-serif; font-weight:500; font-size:0.9rem; }
+div[data-testid="stTabs"] button {
+    font-family:'Inter',sans-serif; font-weight:500; font-size:0.9rem; }
 div[data-testid="stButton"] button[kind="primary"] {
     background:#1d4ed8; border:none; border-radius:8px; font-weight:600;
     font-family:'Inter',sans-serif; padding:0.5rem 2rem; font-size:0.95rem; }
 div[data-testid="stButton"] button[kind="primary"]:hover { background:#1e40af; }
 div[data-testid="stTextArea"] textarea {
-    border-radius:8px; font-family:'Inter',sans-serif; font-size:0.93rem; border:1.5px solid #e2e8f0; }
+    border-radius:8px; font-family:'Inter',sans-serif;
+    font-size:0.93rem; border:1.5px solid #e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -177,6 +187,7 @@ def clean_text(text: str) -> str:
     text = strip_byline(str(text))
     text = text.lower()
     text = re.sub(r'http\S+|www\S+', '', text)
+    text = re.sub(r'\b(reuters|associated press|afp|pti|ani|ians)\b', '', text)
     text = text.translate(str.maketrans('', '', string.punctuation))
     text = re.sub(r'\d+', '', text)
     tokens = [w for w in text.split() if w not in STOP_WORDS and len(w) > 2]
@@ -198,7 +209,9 @@ def get_lime(text: str):
         def predict_fn(texts):
             vecs = vectorizer.transform([clean_text(t) for t in texts])
             return model.predict_proba(vecs)
-        exp = explainer.explain_instance(text, predict_fn, num_features=20, num_samples=500)
+        exp = explainer.explain_instance(
+            text, predict_fn, num_features=20, num_samples=500
+        )
         return dict(exp.as_list())
     except Exception:
         return {}
@@ -234,9 +247,8 @@ def scrape_url(url: str) -> str:
         return ""
 
 # ── NewsAPI ───────────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=600)  # cache 10 min
-def fetch_live_news(query: str, sources: str = "", language: str = "en", page_size: int = 12):
-    """Fetch articles from NewsAPI."""
+@st.cache_data(show_spinner=False, ttl=600)
+def fetch_live_news(query: str, language: str = "en", page_size: int = 12):
     params = {
         "q":        query,
         "language": language,
@@ -244,73 +256,59 @@ def fetch_live_news(query: str, sources: str = "", language: str = "en", page_si
         "sortBy":   "publishedAt",
         "apiKey":   NEWS_API_KEY,
     }
-    if sources:
-        params["sources"] = sources
     try:
-        r = requests.get("https://newsapi.org/v2/everything", params=params, timeout=10)
+        r    = requests.get("https://newsapi.org/v2/everything", params=params, timeout=10)
         data = r.json()
-        if data.get("status") == "ok":
-            return data.get("articles", [])
-        return []
+        return data.get("articles", []) if data.get("status") == "ok" else []
     except Exception:
         return []
 
 @st.cache_data(show_spinner=False, ttl=600)
-def fetch_top_headlines(country: str = "in", category: str = "general", page_size: int = 12):
-    """Fetch top headlines — for Indian news use country='in'."""
+def fetch_top_headlines(country: str = "in", page_size: int = 12):
     params = {
         "country":  country,
-        "category": category,
         "pageSize": page_size,
         "apiKey":   NEWS_API_KEY,
     }
     try:
-        r = requests.get("https://newsapi.org/v2/top-headlines", params=params, timeout=10)
+        r    = requests.get("https://newsapi.org/v2/top-headlines", params=params, timeout=10)
         data = r.json()
-        if data.get("status") == "ok":
-            return data.get("articles", [])
-        return []
+        return data.get("articles", []) if data.get("status") == "ok" else []
     except Exception:
         return []
 
 def get_source_meta(source_id: str, source_name: str):
-    """Return (flag, display_name) for a news source."""
     if source_id and source_id in SOURCE_META:
         return SOURCE_META[source_id]
-    # Guess country from name
-    indian_keywords = ['hindu', 'ndtv', 'india', 'times of india', 'hindustan', 'express',
-                       'economic times', 'mint', 'deccan', 'tribune', 'wire']
-    name_lower = (source_name or "").lower()
-    if any(k in name_lower for k in indian_keywords):
+    indian_kw = ['hindu', 'ndtv', 'india', 'times of india', 'hindustan',
+                 'express', 'economic times', 'mint', 'deccan', 'tribune', 'wire']
+    if any(k in (source_name or "").lower() for k in indian_kw):
         return ("🇮🇳", source_name)
     return ("📰", source_name or "Unknown")
 
 def analyse_articles(articles: list) -> list:
-    """Run prediction on a list of NewsAPI articles."""
     results = []
     for art in articles:
-        title   = art.get("title") or ""
+        title   = art.get("title")   or ""
         desc    = art.get("description") or ""
         content = art.get("content") or ""
         text    = f"{title} {desc} {content}".strip()
-        if not text or text == "[Removed]" or title == "[Removed]":
+        if not text or title == "[Removed]":
             continue
-
-        source_id   = (art.get("source") or {}).get("id",   "") or ""
-        source_name = (art.get("source") or {}).get("name", "") or ""
-        flag, display_name = get_source_meta(source_id, source_name)
-
+        sid  = (art.get("source") or {}).get("id",   "") or ""
+        snam = (art.get("source") or {}).get("name", "") or ""
+        flag, display_name = get_source_meta(sid, snam)
         verdict, confidence, proba = predict(text)
         results.append({
-            "title":        title,
-            "url":          art.get("url", "#"),
-            "source":       display_name,
-            "flag":         flag,
-            "published":    art.get("publishedAt", "")[:10],
-            "verdict":      verdict,
-            "confidence":   confidence,
-            "fake_prob":    proba[0],
-            "real_prob":    proba[1],
+            "title":      title,
+            "url":        art.get("url", "#"),
+            "source":     display_name,
+            "flag":       flag,
+            "published":  (art.get("publishedAt") or "")[:10],
+            "verdict":    verdict,
+            "confidence": confidence,
+            "fake_prob":  proba[0],
+            "real_prob":  proba[1],
         })
     return results
 
@@ -323,7 +321,6 @@ if "history" not in st.session_state:
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("### 🔍 Fake News Detector")
-    
     st.markdown("---")
 
     if model is None:
@@ -333,37 +330,15 @@ with st.sidebar:
         st.markdown(
             f"<div style='font-size:0.85rem;color:#334155;background:#f1f5f9;"
             f"padding:6px 10px;border-radius:6px;font-family:monospace'>"
-            f"{metrics.get('best_model','—')}</div>",
+            f"{metrics.get('best_model', '—')}</div>",
             unsafe_allow_html=True
         )
         st.markdown(" ")
-
-        # Show dataset info
-        ds = metrics.get("dataset_info", {})
-        if ds:
-            st.markdown("**Trained on**")
-            has_india = ds.get("india_articles", 0) > 0
-            info_parts = []
-            if ds.get("us_articles"):
-                info_parts.append(f"🇺🇸 {ds['us_articles']:,} US articles")
-            if ds.get("india_articles"):
-                info_parts.append(f"🇮🇳 {ds['india_articles']:,} Indian articles")
-            info_html = "<br>".join(info_parts) if info_parts else f"{ds.get('total_articles',0):,} articles"
-            st.markdown(
-                f"<div style='font-size:0.82rem;color:#334155;background:#f1f5f9;"
-                f"padding:8px 10px;border-radius:6px;line-height:1.8'>"
-                f"{info_html}</div>",
-                unsafe_allow_html=True
-            )
-            if not has_india:
-                st.info("💡 Add Indian dataset for better Indian news accuracy — see download_indian_dataset.py")
-
-        st.markdown(" ")
         st.markdown("**Features**")
         st.markdown(
-            "<div style='font-size:0.85rem;color:#334155;background:#f1f5f9;"
-            "padding:6px 10px;border-radius:6px;font-family:monospace'>"
-            f"TF-IDF · Unigrams+Bigrams · {metrics.get('vocab_size',0):,} features</div>",
+            f"<div style='font-size:0.85rem;color:#334155;background:#f1f5f9;"
+            f"padding:6px 10px;border-radius:6px;font-family:monospace'>"
+            f"TF-IDF · Unigrams+Bigrams · {metrics.get('vocab_size', 0):,} features</div>",
             unsafe_allow_html=True
         )
 
@@ -403,14 +378,12 @@ with st.sidebar:
             if len(all_models) > 1:
                 st.markdown("---")
                 st.markdown("**Model Comparison**")
-                rows = []
                 best = metrics.get("best_model", "")
-                for name, m in all_models.items():
-                    rows.append({
-                        "Model":    ("🏆 " if name == best else "") + name,
-                        "Accuracy": f"{m['accuracy']*100:.2f}%",
-                        "F1":       f"{m['f1_score']*100:.2f}%",
-                    })
+                rows = [{
+                    "Model":    ("🏆 " if n == best else "") + n,
+                    "Accuracy": f"{m['accuracy']*100:.2f}%",
+                    "F1":       f"{m['f1_score']*100:.2f}%",
+                } for n, m in all_models.items()]
                 st.dataframe(
                     pd.DataFrame(rows).set_index("Model"),
                     use_container_width=True
@@ -424,12 +397,11 @@ with st.sidebar:
         )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN AREA
+# MAIN
 # ══════════════════════════════════════════════════════════════════════════════
-
 st.markdown("""
 <div class="app-header">
-    <div class="header-badge">NLP · Machine Learning · TF-IDF + Linear SVM </div>
+    <div class="header-badge">NLP · Machine Learning · TF-IDF + Linear SVM</div>
     <h1>🔍 Fake News Detector</h1>
     <p>Paste an article, upload a file, enter a URL — or check live news from India &amp; around the world.<br>
     Word-level explanation shows exactly what the model found.</p>
@@ -437,13 +409,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if model is None:
-    st.error(
-        "**Model not found.** Train the model first:\n\n"
-        "```bash\npython train_model.py\n```"
-    )
+    st.error("**Model not found.**\n\n```bash\npython train_model.py\n```")
     st.stop()
 
-# Input tabs — now with Live News
 tab_text, tab_file, tab_url, tab_live = st.tabs([
     "✍️  Paste text", "📄  Upload file", "🔗  From URL", "📡  Live News"
 ])
@@ -453,26 +421,21 @@ input_text = ""
 with tab_text:
     st.markdown(" ")
     t = st.text_area(
-        "News article or headline",
+        "Article",
         height=200,
-        placeholder="Paste the full article text here for best results.\nHeadlines work too, but full articles give higher confidence.",
+        placeholder="Paste the full article text here for best results.\nHeadlines work too but full articles give higher confidence.",
         label_visibility="collapsed",
     )
     if t.strip():
         input_text = t.strip()
     st.markdown(
-        "<small style='color:#94a3b8'>💡 Tip: longer articles give more accurate results "
-        "— TF-IDF works best with more text.</small>",
+        "<small style='color:#94a3b8'>💡 Tip: longer articles give more accurate results.</small>",
         unsafe_allow_html=True
     )
 
 with tab_file:
     st.markdown(" ")
-    uploaded = st.file_uploader(
-        "Upload a plain-text file (.txt)",
-        type=["txt"],
-        label_visibility="collapsed",
-    )
+    uploaded = st.file_uploader("Upload .txt", type=["txt"], label_visibility="collapsed")
     if uploaded:
         input_text = uploaded.read().decode("utf-8", errors="ignore").strip()
         st.success(f"File loaded — {len(input_text):,} characters")
@@ -482,12 +445,12 @@ with tab_file:
 with tab_url:
     st.markdown(" ")
     url = st.text_input(
-        "News article URL",
-        placeholder="https://www.bbc.com/news/...",
-        label_visibility="collapsed",
+        "URL",
+        placeholder="https://www.thehindu.com/...",
+        label_visibility="collapsed"
     )
     if st.button("Fetch article →", disabled=not bool(url)):
-        with st.spinner("Fetching article…"):
+        with st.spinner("Fetching…"):
             fetched = scrape_url(url)
         if fetched:
             input_text = fetched
@@ -495,11 +458,9 @@ with tab_url:
             with st.expander("Preview"):
                 st.text(fetched[:1000] + ("…" if len(fetched) > 1000 else ""))
         else:
-            st.error("Could not fetch article — try pasting the text directly.")
+            st.error("Could not fetch — try pasting the text directly.")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LIVE NEWS TAB
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Live News Tab ─────────────────────────────────────────────────────────────
 with tab_live:
     st.markdown(" ")
     st.markdown(
@@ -507,41 +468,39 @@ with tab_live:
         "padding:1rem 1.2rem;margin-bottom:1.2rem'>"
         "<b style='color:#1d4ed8'>📡 Live News Analysis</b><br>"
         "<span style='font-size:0.88rem;color:#334155'>"
-        "Fetches real headlines from NewsAPI and runs them through the detector. "
-        "Results show which articles the model flags — always verify with the original source."
-        "</span></div>",
+        "Fetches real headlines from NewsAPI and runs them through the detector instantly. "
+        "Always verify with the original source.</span></div>",
         unsafe_allow_html=True
     )
 
-    live_col1, live_col2 = st.columns([2, 1])
-    with live_col1:
+    c1, c2 = st.columns([3, 1])
+    with c1:
         live_mode = st.radio(
-            "News source",
+            "Mode",
             ["🇮🇳 Top headlines — India", "🌐 Search any topic", "📰 Top headlines — Global"],
             horizontal=True,
             label_visibility="collapsed",
         )
-    with live_col2:
-        live_count = st.selectbox("Articles to fetch", [6, 10, 15, 20], index=1)
+    with c2:
+        live_count = st.selectbox("Count", [6, 10, 15, 20], index=1, label_visibility="collapsed")
 
+    live_query = ""
+    lang_code  = "en"
     if live_mode == "🌐 Search any topic":
-        search_col1, search_col2 = st.columns([3, 1])
-        with search_col1:
+        sc1, sc2 = st.columns([3, 1])
+        with sc1:
             live_query = st.text_input(
-                "Search topic",
+                "Topic",
                 placeholder="e.g.  Modi  /  election  /  economy  /  climate",
                 label_visibility="collapsed",
             )
-        with search_col2:
-            lang_opt = st.selectbox("Language", ["English", "Hindi"], label_visibility="collapsed")
-        lang_code = "en" if lang_opt == "English" else "hi"
-    else:
-        live_query = ""
+        with sc2:
+            lang_code = "en" if st.selectbox(
+                "Lang", ["English", "Hindi"], label_visibility="collapsed"
+            ) == "English" else "hi"
 
-    fetch_btn = st.button("🔍 Fetch & Analyse", type="primary")
-
-    if fetch_btn:
-        with st.spinner("Fetching live news and running analysis…"):
+    if st.button("🔍 Fetch & Analyse", type="primary", key="live_btn"):
+        with st.spinner("Fetching live news and analysing…"):
             if live_mode == "🇮🇳 Top headlines — India":
                 articles = fetch_top_headlines(country="in", page_size=live_count)
             elif live_mode == "📰 Top headlines — Global":
@@ -554,41 +513,38 @@ with tab_live:
                     articles = fetch_live_news(live_query.strip(), language=lang_code, page_size=live_count)
 
         if not articles:
-            st.error("No articles returned. Check your internet connection or try a different query.")
+            st.error("No articles returned. Check your API key or internet connection.")
         else:
             results = analyse_articles(articles)
             if not results:
-                st.warning("Articles were fetched but could not be analysed.")
+                st.warning("Articles fetched but could not be analysed.")
             else:
-                # Summary row
-                real_count = sum(1 for r in results if r["verdict"] == "Real")
-                fake_count = sum(1 for r in results if r["verdict"] == "Fake")
-                avg_conf   = sum(r["confidence"] for r in results) / len(results) * 100
+                real_c = sum(1 for r in results if r["verdict"] == "Real")
+                fake_c = sum(1 for r in results if r["verdict"] == "Fake")
+                avg_c  = sum(r["confidence"] for r in results) / len(results) * 100
 
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Articles analysed", len(results))
-                s2.metric("✅ Likely Real",    real_count)
-                s3.metric("❌ Likely Fake",    fake_count)
-                s4.metric("Avg confidence",   f"{avg_conf:.0f}%")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Analysed",        len(results))
+                m2.metric("✅ Likely Real",   real_c)
+                m3.metric("❌ Likely Fake",   fake_c)
+                m4.metric("Avg confidence",  f"{avg_c:.0f}%")
 
                 st.markdown("---")
 
-                # Filter controls
-                fc1, fc2 = st.columns([2, 2])
+                fc1, fc2 = st.columns(2)
                 with fc1:
                     show_filter = st.selectbox(
-                        "Show",
+                        "Filter",
                         ["All articles", "Likely Real only", "Likely Fake only"],
                         label_visibility="collapsed",
                     )
                 with fc2:
                     sort_by = st.selectbox(
-                        "Sort by",
+                        "Sort",
                         ["Confidence (high → low)", "Date (newest first)", "Source"],
                         label_visibility="collapsed",
                     )
 
-                # Apply filter & sort
                 filtered = results
                 if show_filter == "Likely Real only":
                     filtered = [r for r in results if r["verdict"] == "Real"]
@@ -599,10 +555,9 @@ with tab_live:
                     filtered = sorted(filtered, key=lambda x: x["confidence"], reverse=True)
                 elif sort_by == "Date (newest first)":
                     filtered = sorted(filtered, key=lambda x: x["published"], reverse=True)
-                elif sort_by == "Source":
+                else:
                     filtered = sorted(filtered, key=lambda x: x["source"])
 
-                # Render cards
                 for r in filtered:
                     is_real  = r["verdict"] == "Real"
                     conf_pct = r["confidence"] * 100
@@ -612,18 +567,17 @@ with tab_live:
                         card_cls  = "news-card news-card-uncertain"
                         badge_cls = "badge-uncertain"
                         badge_txt = f"⚠️ Uncertain {conf_pct:.0f}%"
+                        bar_color = "#d97706"
                     elif is_real:
                         card_cls  = "news-card news-card-real"
                         badge_cls = "badge-real"
                         badge_txt = f"✅ Real {conf_pct:.0f}%"
+                        bar_color = "#16a34a"
                     else:
                         card_cls  = "news-card news-card-fake"
                         badge_cls = "badge-fake"
                         badge_txt = f"❌ Fake {conf_pct:.0f}%"
-
-                    bar_color = "#16a34a" if is_real else "#dc2626"
-                    if uncertain:
-                        bar_color = "#d97706"
+                        bar_color = "#dc2626"
 
                     st.markdown(f"""
                     <div class="{card_cls}">
@@ -645,43 +599,36 @@ with tab_live:
                     """, unsafe_allow_html=True)
 
                 st.markdown(
-                    "<small style='color:#94a3b8'>⚠️ This tool analyses <b>writing style</b>, "
+                    "<small style='color:#94a3b8'>⚠️ Analyses <b>writing style</b>, "
                     "not factual accuracy. Always verify with the original source.</small>",
                     unsafe_allow_html=True
                 )
 
-                # Export option
-                if st.button("📥 Export results as CSV"):
-                    export_df = pd.DataFrame([{
-                        "Headline":    r["title"],
-                        "Source":      f"{r['flag']} {r['source']}",
-                        "Date":        r["published"],
-                        "Verdict":     r["verdict"],
-                        "Confidence":  f"{r['confidence']*100:.1f}%",
-                        "Real prob":   f"{r['real_prob']*100:.1f}%",
-                        "Fake prob":   f"{r['fake_prob']*100:.1f}%",
-                        "URL":         r["url"],
-                    } for r in filtered])
-                    csv = export_df.to_csv(index=False)
-                    st.download_button(
-                        "⬇️ Download CSV",
-                        data=csv,
-                        file_name=f"live_news_analysis_{datetime.date.today()}.csv",
-                        mime="text/csv",
-                    )
+                export_df = pd.DataFrame([{
+                    "Headline":   r["title"],
+                    "Source":     f"{r['flag']} {r['source']}",
+                    "Date":       r["published"],
+                    "Verdict":    r["verdict"],
+                    "Confidence": f"{r['confidence']*100:.1f}%",
+                    "Real prob":  f"{r['real_prob']*100:.1f}%",
+                    "Fake prob":  f"{r['fake_prob']*100:.1f}%",
+                    "URL":        r["url"],
+                } for r in filtered])
+                st.download_button(
+                    "📥 Download results as CSV",
+                    data=export_df.to_csv(index=False),
+                    file_name=f"live_news_{datetime.date.today()}.csv",
+                    mime="text/csv",
+                )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ANALYSE (manual input tabs)
-# ══════════════════════════════════════════════════════════════════════════════
+# ── Manual analyse controls ───────────────────────────────────────────────────
 st.markdown(" ")
-
 col_lime, col_btn = st.columns([3, 1])
 with col_lime:
     use_lime = st.checkbox(
         "Show word-level explanation (LIME)",
         value=True,
-        help="Highlights which words pushed the model toward Fake (red) or Real (green). "
-             "Uses 500 perturbation samples."
+        help="Highlights which words pushed the model toward Fake (red) or Real (green)."
     )
 with col_btn:
     analyse = st.button(
@@ -704,13 +651,10 @@ if analyse:
     pct_cls  = "conf-pct-real" if is_real else "conf-pct-fake"
 
     st.markdown("---")
-
     st.markdown(f"""
     <div class="{card_cls}">
         <div class="result-label">{icon} Likely {result} News</div>
-        <div class="result-sub">
-            Based on writing style, vocabulary patterns, and linguistic features
-        </div>
+        <div class="result-sub">Based on writing style, vocabulary patterns, and linguistic features</div>
         <div class="conf-wrap">
             <div class="conf-label">Confidence</div>
             <div class="{pct_cls} conf-pct">{confidence*100:.1f}%</div>
@@ -734,16 +678,16 @@ if analyse:
     if use_lime and word_weights:
         preview   = input_text[:700] + ("…" if len(input_text) > 700 else "")
         lime_html = render_lime_html(preview, word_weights)
-
         st.markdown(f"""
         <div class="lime-section">
             <div class="lime-title">Word-level Explanation (LIME)</div>
             <div class="lime-legend">
-                <span style="background:#bbf7d0;color:#14532d;padding:1px 6px;border-radius:3px;font-weight:600;font-size:0.78rem">GREEN</span>
-                supports <b>Real</b> &nbsp;·&nbsp;
-                <span style="background:#fecaca;color:#7f1d1d;padding:1px 6px;border-radius:3px;font-weight:600;font-size:0.78rem">RED</span>
-                supports <b>Fake</b> &nbsp;·&nbsp;
-                Hover a word to see its weight
+                <span style="background:#bbf7d0;color:#14532d;padding:1px 6px;border-radius:3px;
+                      font-weight:600;font-size:0.78rem">GREEN</span> supports <b>Real</b>
+                &nbsp;·&nbsp;
+                <span style="background:#fecaca;color:#7f1d1d;padding:1px 6px;border-radius:3px;
+                      font-weight:600;font-size:0.78rem">RED</span> supports <b>Fake</b>
+                &nbsp;·&nbsp; Hover a word to see its weight
             </div>
             <div class="lime-text">{lime_html}</div>
         </div>
@@ -755,14 +699,13 @@ if analyse:
             top_df["Direction"] = top_df["Weight"].apply(lambda w: "→ Real" if w > 0 else "→ Fake")
             top_df["Weight"]    = top_df["Weight"].round(4)
             st.dataframe(top_df, use_container_width=True, hide_index=True)
-
     elif use_lime:
         st.info("LIME explanation unavailable for this input.")
 
     if len(input_text.split()) < 30:
         st.markdown(
-            "<small style='color:#94a3b8'>ℹ️ Short text — confidence may be lower. "
-            "Paste a full article for a more reliable result.</small>",
+            "<small style='color:#94a3b8'>ℹ️ Short text — paste a full article for "
+            "a more reliable result.</small>",
             unsafe_allow_html=True
         )
 
@@ -782,10 +725,11 @@ if st.session_state.history:
         <div class="hist-title">Session History</div>
     </div>
     """, unsafe_allow_html=True)
-
-    hist_df = pd.DataFrame(st.session_state.history[::-1])
-    st.dataframe(hist_df, use_container_width=True, hide_index=True)
-
+    st.dataframe(
+        pd.DataFrame(st.session_state.history[::-1]),
+        use_container_width=True,
+        hide_index=True
+    )
     if st.button("Clear history", type="secondary"):
         st.session_state.history = []
         st.rerun()
