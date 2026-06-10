@@ -163,9 +163,12 @@ div[data-testid="stTextArea"] textarea {
 # ── Load model ────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def load_artifacts():
-    if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
+    base = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base, "model.pkl")
+    vec_path = os.path.join(base, "vectorizer.pkl")
+    if not os.path.exists(model_path) or not os.path.exists(vec_path):
         return None, None
-    return joblib.load("model.pkl"), joblib.load("vectorizer.pkl")
+    return joblib.load(model_path), joblib.load(vec_path)
 
 @st.cache_data(show_spinner=False)
 def load_metrics():
