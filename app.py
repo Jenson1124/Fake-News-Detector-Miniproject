@@ -11,13 +11,14 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# ── Config — MUST be first Streamlit call ─────────────────────────────────────
 st.set_page_config(
     page_title="Fake News Detector",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+print("APP STARTED")
 
 # ── Auto-train on first run ───────────────────────────────────────────────────
 if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
@@ -186,13 +187,18 @@ def load_artifacts():
 
 @st.cache_data(show_spinner=False)
 def load_metrics():
-    if os.path.exists("metrics.json"):
-        with open("metrics.json") as f:
-            return json.load(f)
+    try:
+        if os.path.exists("metrics.json"):
+            with open("metrics.json") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Metrics error: {e}")
+
     return {}
 
-model = None
-vectorizer = None
+print("LOADING MODEL...")
+model, vectorizer = load_artifacts()
+print("MODEL LOADED")
 
 st.sidebar.success("App Started")
 st.sidebar.write("Model Loaded:", model is not None)
