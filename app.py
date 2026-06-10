@@ -1,7 +1,9 @@
 """
 app.py — Fake News Detector | Streamlit Web Application
 """
+import streamlit as st
 
+st.write("APP STARTED")
 import json, os, re, string, warnings, datetime
 warnings.filterwarnings("ignore")
 
