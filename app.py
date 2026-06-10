@@ -13,6 +13,19 @@ import pandas as pd
 import requests
 import streamlit as st
 
+# ── Auto-train on first run (Streamlit Cloud) ─────────────────────────────────
+# ── Auto-train on first run (Streamlit Cloud) ─────────────────────────────────
+if not os.path.exists("model.pkl") or not os.path.exists("vectorizer.pkl"):
+    import subprocess
+    st.warning("⏳ First run — training model. This takes about 3 minutes. Please wait.")
+    progress = st.progress(0, text="Downloading dataset...")
+    subprocess.run(["python", "download_dataset.py"], check=True)
+    progress.progress(40, text="Training model...")
+    subprocess.run(["python", "train_model.py"], check=True)
+    progress.progress(100, text="Done!")
+    st.success("✅ Ready! Reloading...")
+    st.rerun()
+
 nltk.download("stopwords", quiet=True)
 from nltk.corpus import stopwords
 STOP_WORDS = set(stopwords.words("english")) | {
@@ -29,7 +42,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-NEWS_API_KEY = "fbe1af9131d1412a9336739da2599c32"
+NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "fbe1af9131d1412a9336739da2599c32")
 
 # Source → (country flag, display name)
 SOURCE_META = {
