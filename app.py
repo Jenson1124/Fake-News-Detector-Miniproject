@@ -34,7 +34,12 @@ try:
     from nltk.corpus import stopwords
     STOP_WORDS = set(stopwords.words("english"))
 except Exception:
-    STOP_WORDS = set()
+    try:
+        nltk.download("stopwords", quiet=True)
+        from nltk.corpus import stopwords
+        STOP_WORDS = set(stopwords.words("english"))
+    except Exception:
+        STOP_WORDS = set()
 
 STOP_WORDS.update({
     "reuters", "ap", "afp", "said", "would",
