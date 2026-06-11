@@ -112,3 +112,13 @@ fake-news-detector/
 ## 🛠️ Tech Stack
 
 `Python` · `scikit-learn` · `TF-IDF` · `Linear SVM` · `LIME` · `Streamlit` · `NewsAPI` · `newspaper3k` · `NLTK`
+
+🔗 **Live demo:** 
+
+https://fake-news-detector-miniproject-lz6sy6epkqqvouzqpn4ngn.streamlit.app/
+
+## Author
+
+Jenson Antony Jenianto
+
+
